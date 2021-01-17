@@ -1,12 +1,12 @@
 import socket
 import threading
 import time
+from typing import Iterable
 
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 
-from crypto import generate_key_pair, load_public_key, encrypt, decrypt
-from helpers import Sender
-from sever import ResponseCode, BUFFER_SIZE
+from crypto import generate_key_pair, load_public_key
+from helpers import Sender, ResponseCode, BUFFER_SIZE
 
 private_key, serial_private_key, public_key, serial_public_key = generate_key_pair(4096, verbose=True)
 
@@ -19,7 +19,7 @@ class Signal:
     KEEP_RUNNING = True
 
 
-def authenticate(connexion_to_server: socket.socket) -> RSAPublicKey:
+def authenticate(connexion_to_server: socket.socket) -> tuple[str, RSAPublicKey]:
     username = input("username ?> ")
     payload = b"\n".join([username.encode(), serial_public_key])
     connexion_to_server.sendall(payload)
@@ -29,22 +29,20 @@ def authenticate(connexion_to_server: socket.socket) -> RSAPublicKey:
     elif response == ResponseCode.USERNAME_DOES_NOT_EXIST:
         raise AuthenticationError("This username does not exist. Add your public key to the payload to create it.")
     else:
-        return load_public_key(response)
+        return username, load_public_key(response)
 
 
-def send_messages(connexion_to_server: socket.socket, recipients: dict[bytes, RSAPublicKey]):
+def send_messages(sender: Sender, recipient_keys: Iterable[RSAPublicKey]):
     while Signal.KEEP_RUNNING:
         message = input("Say something >>> ").encode()
-        for recipient, key in recipients.items():
-            connexion_to_server.sendall(encrypt(key, message))
+        for key in recipient_keys:
+            sender.send(message, encrypting_key=key)
 
 
 def listen_messages(sender: Sender):
     while Signal.KEEP_RUNNING:
-        username = sender.recv()
-        sender.send(ResponseCode.RECEIVED)
+        username = sender.recv().decode()
         message = sender.recv().decode()
-        sender.send(ResponseCode.RECEIVED)
         print(f"{username} said : {message}")
 
 
@@ -53,7 +51,7 @@ def main(ip, port):
         sender = Sender(client, decrypting_key=private_key)
         client.connect((ip, port))
         try:
-            server_public_key = authenticate(client)
+            username, server_public_key = authenticate(client)
         except AuthenticationError as e:
             print(e)
         else:
@@ -64,20 +62,19 @@ def main(ip, port):
                 if recipient == "exit":
                     break
                 recipients.append(recipient)
-            sender.send(",".join(recipients).encode())
+            recipients.append(username)
+            sender.send(",".join(recipients).encode(), wait_for_ar=False)
             response = sender.recv()
-            sender.send(ResponseCode.RECEIVED)
             if response != ResponseCode.ROOM_CREATED:
                 print(f"These users {response.decode().split(',')} don't exist")
                 # todo : inform server
             else:
-                recipients_public_keys = {}
-                for recipient in recipients:
-                    recipients_public_keys[recipient] = load_public_key(sender.recv(decrypt=False))
-                    sender.send(ResponseCode.RECEIVED)
+                recipients_keys = []
+                for _ in recipients:
+                    recipients_keys.append(load_public_key(sender.recv(decrypt=False)))
                 threads = [
-                    threading.Thread(target=send_messages, args=[client, recipients_public_keys]),
-                    threading.Thread(target=listen_messages, args=[sender]),
+                    threading.Thread(target=send_messages, args=[sender, recipients_keys], name=f"message sender"),
+                    threading.Thread(target=listen_messages, args=[sender], name="message listener"),
                 ]
                 [thread.start() for thread in threads]
                 while True:
@@ -89,4 +86,4 @@ def main(ip, port):
 
 
 if __name__ == "__main__":
-    main("127.0.0.1", 8889)
+    main("127.0.0.1", 8887)
