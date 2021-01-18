@@ -6,13 +6,9 @@ from typing import Iterable
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 
 from crypto import generate_key_pair, load_public_key
-from helpers import Sender, ResponseCode, BUFFER_SIZE
+from helpers import Sender, ResponseCode, BUFFER_SIZE, AuthenticationError, RoomCreationError
 
 private_key, serial_private_key, public_key, serial_public_key = generate_key_pair(4096, verbose=True)
-
-
-class AuthenticationError(Exception):
-    pass
 
 
 class Signal:
@@ -32,6 +28,25 @@ def authenticate(connexion_to_server: socket.socket) -> tuple[str, RSAPublicKey]
         return username, load_public_key(response)
 
 
+def build_room(sender: Sender, username: str):
+    recipients = []
+    while True:
+        recipient = input("Input a recipient name (type exit when you are done) >>> ")
+        if recipient == "exit":
+            break
+        recipients.append(recipient)
+    recipients.append(username)
+    sender.send(",".join(recipients).encode(), wait_for_ar=False)
+    response = sender.recv()
+    if response != ResponseCode.ROOM_CREATED:
+        raise RoomCreationError(f"These users {response.decode().split(',')} don't exist")
+    else:
+        recipients_keys = []
+        for _ in recipients:
+            recipients_keys.append(load_public_key(sender.recv(decrypt=False)))
+    return recipients_keys
+
+
 def send_messages(sender: Sender, recipient_keys: Iterable[RSAPublicKey]):
     while Signal.KEEP_RUNNING:
         message = input("Say something >>> ").encode()
@@ -48,36 +63,25 @@ def listen_messages(sender: Sender):
 
 def main(ip, port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
-        sender = Sender(client, decrypting_key=private_key)
         client.connect((ip, port))
+        sender = Sender(client, decrypting_key=private_key)
         try:
             username, server_public_key = authenticate(client)
         except AuthenticationError as e:
             print(e)
         else:
             sender.encrypting_key = server_public_key
-            recipients = []
-            while True:
-                recipient = input("Input a recipient name (type exit when you are done) >>> ")
-                if recipient == "exit":
-                    break
-                recipients.append(recipient)
-            recipients.append(username)
-            sender.send(",".join(recipients).encode(), wait_for_ar=False)
-            response = sender.recv()
-            if response != ResponseCode.ROOM_CREATED:
-                print(f"These users {response.decode().split(',')} don't exist")
-                # todo : inform server
+            try:
+                recipients_keys = build_room(sender, username)
+            except RoomCreationError as e:
+                print(str(e))
             else:
-                recipients_keys = []
-                for _ in recipients:
-                    recipients_keys.append(load_public_key(sender.recv(decrypt=False)))
                 threads = [
-                    threading.Thread(target=send_messages, args=[sender, recipients_keys], name=f"message sender"),
+                    threading.Thread(target=send_messages, args=[sender, recipients_keys], name="message sender"),
                     threading.Thread(target=listen_messages, args=[sender], name="message listener"),
                 ]
                 [thread.start() for thread in threads]
-                while True:
+                while Signal.KEEP_RUNNING:
                     try:
                         time.sleep(1)
                     except KeyboardInterrupt:

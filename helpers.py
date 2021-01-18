@@ -33,14 +33,14 @@ class Sender:
         if decrypt is None:
             decrypt = decrypting_key is not None
         message = self.connexion.recv(BUFFER_SIZE)
-        print(f"{threading.current_thread().name} : receiving : ", end='')
+        print(f"{threading.current_thread().name} : receiving : ", end="")
         if decrypt:
             if not decrypting_key:
                 raise RuntimeError("Cannot decrypt without an decrypting key")
             try:
                 message = decrypt_(decrypting_key, message)
             except ValueError:
-                message = f'Error, could not decrypt : {message}'.encode()
+                message = f"Error, could not decrypt : {message}".encode()
         print(message)
         if send_ar:
             self.send(ResponseCode.RECEIVED, wait_for_ar=False, encrypt=encrypt_ar)
@@ -52,3 +52,11 @@ class ResponseCode:
     USERNAME_ALREADY_EXISTS = b"1"
     ROOM_CREATED = b"2"
     RECEIVED = b"3"
+
+
+class AuthenticationError(Exception):
+    pass
+
+
+class RoomCreationError(Exception):
+    pass
