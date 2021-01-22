@@ -1,6 +1,7 @@
 import socket
 import threading
 import time
+from collections.abc import Callable
 from typing import Iterable
 
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
@@ -8,14 +9,12 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from crypto import generate_key_pair, load_public_key
 from helpers import Sender, ResponseCode, BUFFER_SIZE, AuthenticationError, RoomCreationError
 
-private_key, serial_private_key, public_key, serial_public_key = generate_key_pair(4096, verbose=True)
-
 
 class Signal:
     KEEP_RUNNING = True
 
 
-def authenticate(connexion_to_server: socket.socket) -> tuple[str, RSAPublicKey]:
+def authenticate(connexion_to_server: socket.socket, serial_public_key: bytes) -> tuple[str, RSAPublicKey]:
     username = input("username ?> ")
     payload = b"\n".join([username.encode(), serial_public_key])
     connexion_to_server.sendall(payload)
@@ -47,9 +46,9 @@ def build_room(sender: Sender, username: str):
     return recipients_keys
 
 
-def send_messages(sender: Sender, recipient_keys: Iterable[RSAPublicKey]):
+def send_messages(sender: Sender, recipient_keys: Iterable[RSAPublicKey], input_: Callable[[], str]):
     while Signal.KEEP_RUNNING:
-        message = input("Say something >>> ").encode()
+        message = input_().encode()
         for key in recipient_keys:
             sender.send(message, encrypting_key=key)
 
@@ -61,12 +60,13 @@ def listen_messages(sender: Sender):
         print(f"{username} said : {message}")
 
 
-def main(ip, port):
+def main(ip, port, input_: Callable[[], str]):
+    private_key, _, _, serial_public_key = generate_key_pair(4096, verbose=True)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
         client.connect((ip, port))
         sender = Sender(client, decrypting_key=private_key)
         try:
-            username, server_public_key = authenticate(client)
+            username, server_public_key = authenticate(client, serial_public_key)
         except AuthenticationError as e:
             print(e)
         else:
@@ -77,7 +77,9 @@ def main(ip, port):
                 print(str(e))
             else:
                 threads = [
-                    threading.Thread(target=send_messages, args=[sender, recipients_keys], name="message sender"),
+                    threading.Thread(
+                        target=send_messages, args=[sender, recipients_keys, input_], name="message sender"
+                    ),
                     threading.Thread(target=listen_messages, args=[sender], name="message listener"),
                 ]
                 [thread.start() for thread in threads]
@@ -90,4 +92,4 @@ def main(ip, port):
 
 
 if __name__ == "__main__":
-    main("127.0.0.1", 8887)
+    main("127.0.0.1", 8887, lambda: input("Say something >>> "))

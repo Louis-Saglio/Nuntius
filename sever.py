@@ -39,10 +39,8 @@ def authenticate(connexion_to_client: socket.socket, serial_public_key) -> tuple
 
 def build_room(sender: Sender, username) -> dict[bytes, SimpleQueue[tuple[bytes, bytes]]]:
     recipients = sender.recv(send_ar=False).split(b",")
-    recipients_set = set(recipients)
-    existing_users = set(public_key_by_username.keys())
-    if not recipients_set.issubset(existing_users):
-        sender.send(b",".join(recipients_set.difference(existing_users)))
+    if not_existing_users := set(recipients).difference(public_key_by_username.keys()):
+        sender.send(b",".join(not_existing_users))
         raise RoomCreationError
     else:
         sender.send(ResponseCode.ROOM_CREATED)

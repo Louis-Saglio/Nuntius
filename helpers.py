@@ -13,6 +13,8 @@ class Sender:
         self.decrypting_key = decrypting_key
         self.connexion = connexion
 
+    # todo : compress data before sending
+
     def send(self, message, wait_for_ar=True, decrypt_ar=None, encrypt=None, encrypting_key=None):
         print(f"{threading.current_thread().name} : sending : {message}")
         encrypting_key = encrypting_key or self.encrypting_key
