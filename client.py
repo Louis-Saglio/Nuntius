@@ -16,7 +16,7 @@ class Signal:
 
 def authenticate(connexion_to_server: socket.socket, serial_public_key: bytes) -> tuple[str, RSAPublicKey]:
     username = input("username ?> ")
-    payload = b"\n".join([username.encode(), serial_public_key])
+    payload = b"\n".join([username.encode(), serial_public_key])  # todo : username not crypted
     connexion_to_server.sendall(payload)
     response = connexion_to_server.recv(BUFFER_SIZE)
     if response == ResponseCode.USERNAME_ALREADY_EXISTS:

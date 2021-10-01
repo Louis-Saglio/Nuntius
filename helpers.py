@@ -12,10 +12,12 @@ class Sender:
         self.encrypting_key = encrypting_key
         self.decrypting_key = decrypting_key
         self.connexion = connexion
+        self.send_lock = threading.Lock()
+        self.recv_lock = threading.Lock()
 
     # todo : compress data before sending
 
-    def send(self, message, wait_for_ar=True, decrypt_ar=None, encrypt=None, encrypting_key=None):
+    def send(self, message, *, wait_for_ar=True, decrypt_ar=None, encrypt=None, encrypting_key=None):
         print(f"{threading.current_thread().name} : sending : {message}")
         encrypting_key = encrypting_key or self.encrypting_key
         if encrypt is None:
@@ -24,16 +26,21 @@ class Sender:
             if not encrypting_key:
                 raise RuntimeError("Cannot encrypt without an encrypting key")
             message = encrypt_(encrypting_key, message)
+        self.send_lock.acquire()
         self.connexion.sendall(message)
         if wait_for_ar:
             ar = self.recv(send_ar=False, decrypt=decrypt_ar)
             assert ar == ResponseCode.RECEIVED, f"Bad response code, expected {ResponseCode.RECEIVED}, got {ar}"
+        if lock:
+            self.send_lock.release()
 
-    def recv(self, send_ar=True, encrypt_ar=None, decrypt=None, decrypting_key=None) -> bytes:
+    def recv(self, *, send_ar=True, encrypt_ar=None, decrypt=None, decrypting_key=None) -> bytes:
         # todo : handle errors
         decrypting_key = decrypting_key or self.decrypting_key
         if decrypt is None:
             decrypt = decrypting_key is not None
+        if lock:
+            self.recv_lock.acquire()
         message = self.connexion.recv(BUFFER_SIZE)
         print(f"{threading.current_thread().name} : receiving : ", end="")
         if decrypt:
@@ -46,6 +53,8 @@ class Sender:
         print(message)
         if send_ar:
             self.send(ResponseCode.RECEIVED, wait_for_ar=False, encrypt=encrypt_ar)
+        if lock:
+            self.recv_lock.release()
         return message
 
 
